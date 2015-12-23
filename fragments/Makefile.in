@@ -1,0 +1,19 @@
+all: collect
+
+collect:
+	@:>$(BUILDDIR)/mergeddeps
+	@for i in `find $(BUILDDIR) -name '*.o.d'`; do			\
+		(awk -v path="$${i%/*.*}" '/^.+:/ {			\
+			print path "/" $$0; next }{ print }' < $$i	\
+			>> $(BUILDDIR)/mergeddeps)			\
+	done
+
+cscope:
+	@echo " CSCOPE"
+	$(V)cscope -k -R -q -u -b -v >/dev/null 2>&1
+
+clean:
+	@echo " CLEAN"
+	$(V)rm -rf $(BUILDDIR) cscope.* $(CLEANFILES)
+
+.PHONY: clean cscope collect

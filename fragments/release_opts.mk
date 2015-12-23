@@ -1,0 +1,2 @@
+CFLAGS += -Os
+LDFLAGS += -s

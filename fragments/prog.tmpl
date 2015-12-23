@@ -1,0 +1,10 @@
+__TARGET__ := $(BUILDDIR)/__PATH__/__TARGET__
+
+$(__TARGET__): $(__NAME___OBJ) __DEPEND__
+	@echo " LD" $@
+	$(V)$(CC) -o $@ $(__NAME___OBJ) __DEPEND__ __LDFLAGS__
+	$(V)$(SIZE) $@
+
+all: $(__TARGET__)
+
+.PHONY: $(__TARGET__)

@@ -1,0 +1,2 @@
+CFLAGS += -Og -ggdb
+CPPFLAGS += -DDEBUG
