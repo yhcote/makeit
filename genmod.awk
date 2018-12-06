@@ -1,10 +1,48 @@
 #!/usr/bin/awk -f
-# Copyright (c) 2015, Yannick Cote <yanick@divyan.org>. All rights reserved.
+# Copyright (c) 2015-2018, Yannick Cote <yhcote@gmail.com>. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be found
 # in the LICENSE file.
 
+function usage()
+{
+	print "usage: genmod mconflist=<module file> makeitgendir=<temp confdir>"
+	print "       host=<host type> tmpldir=<template location>"
+	exit(1)
+}
+
+# remove extra spaces from a string
+function trim(str)
+{
+	gsub(/  +/, " ", str)
+	gsub(/ +$/, "", str)
+	gsub(/^ +/, "", str)
+
+	return str
+}
+
+# print all keyword vars and their values for all project modules
+function printmvars()
+{
+	reset_file("/tmp/mvars")
+	for (m in mconfs) {
+		for (k in keywords) {
+			if (mvars[mconfs[m], keywords[k]] == "")
+				continue
+			printf("%s:%s [%s]\n", mconfs[m], keywords[k],
+			       mvars[mconfs[m], keywords[k]]) >> "/tmp/mvars"
+		}
+		print "" >> "/tmp/mvars"
+	}
+}
+
+# truncate file
+function reset_file(file)
+{
+	printf("") > file
+}
+
 # check if we are still reading keyword values or reached a new keyword
-function getkeyword(words)
+function getkeyword()
 {
 	iskey = 0
 
@@ -14,7 +52,7 @@ function getkeyword(words)
 				iskey = 1
 		}
 		if (iskey == 1) {
-			current = words[1]
+			currkeywd = words[1]
 		} else {
 			print "error:", words[1], "is not a keyword"
 			exit(1)
@@ -23,247 +61,424 @@ function getkeyword(words)
 }
 
 # for a keyword (name, src, cflags, etc.) read its values
-function getvalues(mod, tags, words, current, nfields)
+function getvalues(mconf, nfields)
 {
 	for (j = 2; j <= nfields; j++) {
-		if (tags[mod, current] == "")
-			tags[mod, current] = words[j]
-		else
-			tags[mod, current] = tags[mod, current] " " words[j]
+		mvars[mconf, currkeywd] = mvars[mconf, currkeywd] " " words[j]
+	}
+	mvars[mconf, currkeywd] = trim(mvars[mconf, currkeywd])
+}
+
+# this routine reads and parses all mconf variables from one "mconf" file
+function scanmconf(mconf, makeitgendir)
+{
+	m = makeitgendir "/" mconf ".parsed"
+	while (getline < m > 0) {
+		n = split($0, words, " *:= *| *\\ *|[ \t]*")
+		if (n > 0) {
+			getkeyword()
+			getvalues(mconf, n)
+		}
 	}
 }
 
-# generate object list from src,win_src,unix_src for each module
-function gensrcs(mod, tags)
+# generate object list from [a,c]src,win_[a,c]src,unix_[a,c]src for each module
+function genobjs(mconf)
 {
-	# first "src"
-	split(tags[mod, "src"], srcs, " ")
-	tags[mod, "src"] = ""
-	for (s in srcs) {
-		if (tags[mod, "src"] == "")
-			tags[mod, "src"] = mod "/" srcs[s]
-		else
-			tags[mod, "src"] = tags[mod, "src"] " " mod "/" srcs[s]
+	# first "[a,c]obj"
+	split(mvars[mconf, "csrc"], objs, " ")
+	for (o in objs) {
+		gsub(/\.c$/, ".o", objs[o])
+		mvars[mconf, "cobj"] = mvars[mconf, "cobj"] "$(BUILDDIR)/" objs[o] " "
+		mvars[mconf, "cleanfiles"] = mvars[mconf, "cleanfiles"] " " "$(BUILDDIR)/" objs[o]
+		mvars[mconf, "cleanfiles"] = mvars[mconf, "cleanfiles"] " " "$(BUILDDIR)/" objs[o] ".d"
 	}
-	# then unix_src
-	split(tags[mod, "unix_src"], srcs, " ")
-	tags[mod, "unix_src"] = ""
-	for (s in srcs) {
-		if (tags[mod, "unix_src"] == "")
-			tags[mod, "unix_src"] = mod "/" srcs[s]
-		else
-			tags[mod, "unix_src"] = tags[mod, "unix_src"] " " mod "/" srcs[s]
+
+	split(mvars[mconf, "asrc"], objs, " ")
+	for (o in objs) {
+		gsub(/\.S$/, ".o", objs[o])
+		mvars[mconf, "aobj"] = mvars[mconf, "aobj"] "$(BUILDDIR)/" objs[o] " "
+		mvars[mconf, "cleanfiles"] = mvars[mconf, "cleanfiles"] " " "$(BUILDDIR)/" objs[o]
+		mvars[mconf, "cleanfiles"] = mvars[mconf, "cleanfiles"] " " "$(BUILDDIR)/" objs[o] ".d"
 	}
-	# finaly win_src
-	split(tags[mod, "win_src"], srcs, " ")
-	tags[mod, "win_src"] = ""
-	for (s in srcs) {
-		if (tags[mod, "win_src"] == "")
-			tags[mod, "win_src"] = mod "/" srcs[s]
-		else
-			tags[mod, "win_src"] = tags[mod, "win_src"] " " mod "/" srcs[s]
+
+	# then "unix_[a,c]obj"
+	split(mvars[mconf, "unix_csrc"], objs, " ")
+	for (o in objs) {
+		gsub(/\.c$/, ".o", objs[o])
+		mvars[mconf, "unix_cobj"] = mvars[mconf, "unix_cobj"] "$(BUILDDIR)/" objs[o] " "
+		mvars[mconf, "cleanfiles"] = mvars[mconf, "cleanfiles"] " " "$(BUILDDIR)/" objs[o]
+		mvars[mconf, "cleanfiles"] = mvars[mconf, "cleanfiles"] " " "$(BUILDDIR)/" objs[o] ".d"
+	}
+
+	split(mvars[mconf, "unix_asrc"], objs, " ")
+	for (o in objs) {
+		gsub(/\.S$/, ".o", objs[o])
+		mvars[mconf, "unix_aobj"] = mvars[mconf, "unix_aobj"] "$(BUILDDIR)/" objs[o] " "
+		mvars[mconf, "cleanfiles"] = mvars[mconf, "cleanfiles"] " " "$(BUILDDIR)/" objs[o]
+		mvars[mconf, "cleanfiles"] = mvars[mconf, "cleanfiles"] " " "$(BUILDDIR)/" objs[o] ".d"
+	}
+
+	# then "win_[a,c]obj"
+	split(mvars[mconf, "win_csrc"], objs, " ")
+	for (o in objs) {
+		gsub(/\.c$/, ".o", objs[o])
+		mvars[mconf, "win_cobj"] = mvars[mconf, "win_cobj"] "$(BUILDDIR)/" objs[o] " "
+		mvars[mconf, "cleanfiles"] = mvars[mconf, "cleanfiles"] " " "$(BUILDDIR)/" objs[o]
+		mvars[mconf, "cleanfiles"] = mvars[mconf, "cleanfiles"] " " "$(BUILDDIR)/" objs[o] ".d"
+	}
+
+	split(mvars[mconf, "win_asrc"], objs, " ")
+	for (o in objs) {
+		gsub(/\.S$/, ".o", objs[o])
+		mvars[mconf, "win_aobj"] = mvars[mconf, "win_aobj"] "$(BUILDDIR)/" objs[o] " "
+		mvars[mconf, "cleanfiles"] = mvars[mconf, "cleanfiles"] " " "$(BUILDDIR)/" objs[o]
+		mvars[mconf, "cleanfiles"] = mvars[mconf, "cleanfiles"] " " "$(BUILDDIR)/" objs[o] ".d"
+	}
+
+	# finally "data"
+	split(mvars[mconf, "data"], objs, " ")
+	for (o in objs) {
+		objs[o] = objs[o] ".bin"
+		mvars[mconf, "dobj"] = mvars[mconf, "dobj"] objs[o] " "
+		mvars[mconf, "cleanfiles"] = mvars[mconf, "cleanfiles"] " " "$(BUILDDIR)/" objs[o]
 	}
 }
 
-# generate object list from src,win_src,unix_src for each module
-function genobjs(mod, tags)
+# create the "target" mconf variable based on kind (prog, lib, obj list)
+function gentarget(mconf)
 {
-	# fisrt "obj"
-	split(tags[mod, "src"], objs, " ")
-	for (o in objs) {
-		gsub(/\.c$/, ".o", objs[o])
-		if (tags[mod, "obj"] == "")
-			tags[mod, "obj"] = "$(BUILDDIR)/" objs[o]
-		else
-			tags[mod, "obj"] = tags[mod, "obj"] " " "$(BUILDDIR)/" objs[o]
-	}
-	# then "unix_obj"
-	split(tags[mod, "unix_src"], objs, " ")
-	for (o in objs) {
-		gsub(/\.c$/, ".o", objs[o])
-		if (tags[mod, "unix_obj"] == "")
-			tags[mod, "unix_obj"] = "$(BUILDDIR)/" objs[o]
-		else
-			tags[mod, "unix_obj"] = tags[mod, "unix_obj"] " " "$(BUILDDIR)/" objs[o]
-	}
-	# finaly "win_obj"
-	split(tags[mod, "win_src"], objs, " ")
-	for (o in objs) {
-		gsub(/\.c$/, ".o", objs[o])
-		if (tags[mod, "win_obj"] == "")
-			tags[mod, "win_obj"] = "$(BUILDDIR)/" objs[o]
-		else
-			tags[mod, "win_obj"] = tags[mod, "win_obj"] " " "$(BUILDDIR)/" objs[o]
-	}
-}
-
-function gentarget(mod, tags)
-{
-	if (tags[mod, "prog"] != "") {
+	if (mvars[mconf, "prog"] != "") {
 		# generate target for a program
-		tags[mod, "target"] = tags[mod, "prog"]
+		mvars[mconf, "target"] = mvars[mconf, "prog"]
 		if (envar["host"] == "windows")
-			tags[mod, "target"] = tags[mod, "target"] ".exe"
-	} else if (tags[mod, "lib"] != "") {
+			mvars[mconf, "target"] = mvars[mconf, "target"] ".exe"
+	} else if (mvars[mconf, "lib"] != "") {
 		# generate target for a library
-		tags[mod, "target"] = "lib" tags[mod, "lib"]
+		mvars[mconf, "target"] = "lib" mvars[mconf, "lib"]
+	} else if (mvars[mconf, "data"] != "") {
+		# generate target for embedded data
+		mvars[mconf, "target"] = mvars[mconf, "name"] ".bin.o"
 	} else {
 		# generate target for a simple list of objects
-		tags[mod, "target"] = tags[mod, "name"] "_OBJ"
+		mvars[mconf, "target"] = mvars[mconf, "name"] "_OBJ"
 	}
 }
 
-# for a module.conf file, read and lex all keyword/values pair
-function scanmod(mod)
+# create a list of "deps_link" list based on other mconf target this mconf needs to link with
+function gendeps_link(mconf, idx)
 {
-	modpath = envar["topdir"] "/" mod "/module.conf"
+	# dependency is a program nothing to link with
+	if (mvars[mconfs[mconf], "prog"] != "")
+		return
 
-	while (getline < modpath > 0) {
-		n = split($0, words, "[=\\]|[ \t]*")
-		if (n > 0) {
-			getkeyword(words)
-			getvalues(mod, tags, words, current, n)
+	# dependency is a lib, generate library link rules
+	if (mvars[mconfs[mconf], "lib"] != "") {
+		mvars[mconfs[idx], "deps_link"] = mvars[mconfs[idx], "deps_link"] " " \
+			"-L$(BUILDDIR)/" mconfsdirs[mconf] " -l" mvars[mconfs[mconf], "lib"]
+	} else if (mvars[mconfs[mconf], "data"] != "") {
+		mvars[mconfs[idx], "extralibs"] = "$(" mvars[mconfs[mconf], "target"] ")" " " \
+			mvars[mconfs[idx], "extralibs"]
+	} else {
+		# dependency is just an object list
+		mvars[mconfs[idx], "deps_link"] = "$(" mvars[mconfs[mconf], "target"] ")" " " \
+			mvars[mconfs[idx], "deps_link"]
+	}
+}
+
+# create a "deps_target" list based on other mconf targets this mconf depends on
+function gendeps(idx)
+{
+	split(mvars[mconfs[idx], "depends"], deps, " ")
+	for (d in deps) {
+		found = 0
+		for (m in mconfs) {
+			if (mvars[mconfs[m], "name"] == deps[d]) {
+				gendeps_link(m, idx)
+				mvars[mconfs[idx], "deps_target"] = mvars[mconfs[idx], "deps_target"]  " " \
+				     "$(" mvars[mconfs[m], "target"] ")"
+				found = 1
+			}
+		}
+		# if dependency is NOT a module name but just a verbatim expression to paste in place
+		if (found == 0) {
+			mvars[mconfs[idx], "deps_target"] = mvars[mconfs[idx], "deps_target"] " " deps[d]
 		}
 	}
+	mvars[mconfs[idx], "deps_link"] = trim(mvars[mconfs[idx], "deps_link"])
+	mvars[mconfs[idx], "deps_target"] = trim(mvars[mconfs[idx], "deps_target"])
 }
 
-function usage()
+# output all object lists rules for a specific .mconf file
+function put_objlist(mconf, cobj, aobj, output)
 {
-	print "usage: genmod modfile=<module file> topdir=<project topdir>"
-	exit(1)
-}
-
-# print all keyword vars and their values for all project modules
-function printtags(tags)
-{
-	reset_file("/tmp/tags")
-	for (m in modules) {
-		for (k in keywords) {
-			if (tags[modules[m], keywords[k]] == "")
-				continue
-			printf("%s:%s [%s]\n", modules[m], keywords[k],
-			       tags[modules[m], keywords[k]]) >> "/tmp/tags"
-		}
-		print "" >> "/tmp/tags"
-	}
-}
-
-function reset_file(file)
-{
-	printf("") > file
-}
-
-function put_objlist(name, obj, f)
-{
-	printf("# object files list\n") >> f
-	printf("%s_OBJ := \\\n", name) >> f
+	printf("# object files list\n") >> output
+	printf("%s_OBJ := \\\n", mvars[mconf, "name"]) >> output
 	
-	split(obj, objs, " ")
+	split(cobj, objs, " ")
 	for (o in objs) {
-		printf("\t%s \\\n", objs[o]) >> f
+		printf("\t%s \\\n", objs[o]) >> output
 	}
-	print "" >> f
+	split(aobj, objs, " ")
+	for (o in objs) {
+		printf("\t%s \\\n", objs[o]) >> output
+	}
+	split(mvars[mconf, "dobj"], objs, " ")
+	for (o in objs) {
+		printf("\t%s \\\n", objs[o]) >> output
+	}
+	print "" >> output
 }
 
-function put_suffix_rules(template, obj, cflags, f)
+# output all suffix (build) rules for a specific .mconf file
+function put_suffix_rules(cobj, aobj, mconf, output)
 {
-	printf("# suffix rules (metarules missing from most variants)\n") >> f
+	printf("# suffix rules (metarules missing from most variants)\n") >> output
 
-	split(obj, objs, " ")
+	split(cobj, objs, " ")
 	for (o in objs) {
 		# prepare the source file name `s' out of `o'
 		s = objs[o]
 		gsub(/\.o$/, ".c", s)
 		gsub(/^\$\(BUILDDIR\)\//, "", s)
 
-		while (getline < template > 0) {
+		# fix up the target template when building generated source files
+		if (match(s, /^\$\(BUILDDIR\)\//) == 1) {
+			tmpl = envar["tmpldir"] "/" "suffix_bldir.tmpl"
+			n = split(s, gen, "/")
+			while (getline < tmpl > 0) {
+				gsub(/__OBJ__/, objs[o], $0)
+				gsub(/__SRC__/, s, $0)
+				gsub(/__GENSRC__/, "[GEN] " gen[n], $0)
+				gsub(/__CFLAGS__/, mvars[mconf, "cflags"], $0)
+				# write the result down in the current fragment
+				if ($0 != "") {
+					$0 = trim($0)
+					printf("%s\n", $0) >> output
+				}
+			}
+			close(tmpl)
+		} else {
+			tmpl = envar["tmpldir"] "/" "suffix.tmpl"
+			while (getline < tmpl > 0) {
+				gsub(/__OBJ__/, objs[o], $0)
+				gsub(/__SRC__/, s, $0)
+				gsub(/__CFLAGS__/, mvars[mconf, "cflags"], $0)
+				# write the result down in the current fragment
+				if ($0 != "") {
+					$0 = trim($0)
+					printf("%s\n", $0) >> output
+				}
+			}
+			close(tmpl)
+		}
+	}
+	split(aobj, objs, " ")
+	for (o in objs) {
+		# prepare the source file name `s' out of `o'
+		s = objs[o]
+		gsub(/\.o$/, ".S", s)
+		gsub(/^\$\(BUILDDIR\)\//, "", s)
+
+		# fix up the target template when building generated source files
+		if (match(s, /^\$\(BUILDDIR\)\//) == 1) {
+			tmpl = envar["tmpldir"] "/" "suffix_bldir.tmpl"
+			n = split(s, gen, "/")
+			while (getline < tmpl > 0) {
+				gsub(/__OBJ__/, objs[o], $0)
+				gsub(/__SRC__/, s, $0)
+				gsub(/__GENSRC__/, "[GEN] " gen[n], $0)
+				gsub(/__CFLAGS__/, mvars[mconf, "cflags"], $0)
+				# write the result down in the current fragment
+				if ($0 != "") {
+					$0 = trim($0)
+					printf("%s\n", $0) >> output
+				}
+			}
+			close(tmpl)
+		} else {
+			tmpl = envar["tmpldir"] "/" "suffix.tmpl"
+			while (getline < tmpl > 0) {
+				gsub(/__OBJ__/, objs[o], $0)
+				gsub(/__SRC__/, s, $0)
+				gsub(/__CFLAGS__/, mvars[mconf, "cflags"], $0)
+				# write the result down in the current fragment
+				if ($0 != "") {
+					$0 = trim($0)
+					printf("%s\n", $0) >> output
+				}
+			}
+			close(tmpl)
+		}
+	}
+	split(mvars[mconf, "dobj"], objs, " ")
+	for (o in objs) {
+		# prepare the source file name `s' out of `o'
+		s = objs[o]
+		gsub(/\.bin$/, "", s)
+		gsub(/^\$\(BUILDDIR\)\//, "", s)
+
+		tmpl = envar["tmpldir"] "/" "suffix_data.tmpl"
+		n = split(s, gen, "/")
+		while (getline < tmpl > 0) {
 			gsub(/__OBJ__/, objs[o], $0)
 			gsub(/__SRC__/, s, $0)
-			gsub(/__CFLAGS__/, cflags, $0)
 			# write the result down in the current fragment
-			if ($0 != "")
-				printf("%s\n", $0) >> f
+			if ($0 != "") {
+				$0 = trim($0)
+				printf("%s\n", $0) >> output
+			}
 		}
-		close(template)
+		close(tmpl)
 	}
+
+	print "" >> output
 }
 
-function gendeps(modules, idx, tags)
+# output a "prog" target
+function put_prog(mconf, mconfdir, output)
 {
-	split(tags[modules[idx], "depends"], deps, " ")
-	for (d in deps) {
-		for (m in modules) {
-			if (tags[modules[m], "name"] == deps[d])
-				tags[modules[idx], "deps"] = tags[modules[idx], "deps"] " " "$(" tags[modules[m], "target"] ")"
-		}
+	tmpl = envar["tmpldir"] "/" "prog.tmpl"
+	prefix = ""
+
+	printf("# link the program `%s'\n", mvars[mconf, "target"]) >> output
+	while (getline < tmpl > 0) {
+		gsub(/__TARGET__/, mvars[mconf, "target"], $0)
+		gsub(/__PATH__/, mconfdir, $0)
+		gsub(/__NAME__/, mvars[mconf, "name"], $0)
+		gsub(/__DEPEND_T__/, mvars[mconf, "deps_target"], $0)
+		gsub(/__DEPEND_L__/, mvars[mconf, "deps_link"], $0)
+		gsub(/__LDFLAGS__/, mvars[mconf, "ldflags"], $0)
+		gsub(/__EXTRALIBS__/, mvars[mconf, "extralibs"], $0)
+		$0 = trim($0)
+		printf("%s\n", $0) >> output
 	}
+	close(tmpl)
+	print "" >> output
+
+	mvars[mconf, "cleanfiles"] = mvars[mconf, "cleanfiles"] " " "$(" mvars[mconf, "target"] ")"
 }
 
-function put_prog(template, target, path, name, depends, ldflags, f)
+# output a "lib" target
+function put_lib(mconf, mconfdir, output)
 {
-	printf("# link the program `%s'\n", tags[mod, "prog"]) >> f
-	while (getline < template > 0) {
-		gsub(/__TARGET__/, target, $0)
-		gsub(/__PATH__/, path, $0)
-		gsub(/__NAME__/, name, $0)
-		gsub(/__DEPEND__/, depends, $0)
-		gsub(/__LDFLAGS__/, ldflags, $0)
-		printf("%s\n", $0) >> f
+	tmpl = envar["tmpldir"] "/" "lib.tmpl"
+
+	printf("# create lib `%s'\n", mvars[mconf, "target"]) >> output
+	while (getline < tmpl > 0) {
+		gsub(/__TARGET__/, mvars[mconf, "target"], $0)
+		gsub(/__PATH__/, mconfdir, $0)
+		gsub(/__NAME__/, mvars[mconf, "name"], $0)
+		$0 = trim($0)
+		printf("%s\n", $0) >> output
 	}
-	close(template)
-	print "" >> f
+	close(tmpl)
+	print "" >> output
+
+	mvars[mconf, "cleanfiles"] = mvars[mconf, "cleanfiles"] " " "$(" mvars[mconf, "target"] ")"
 }
 
-function put_lib(template, target, path, f)
+# output a "data" target
+function put_data(mconf, mconfdir, output)
 {
-	printf("# create lib `%s'\n", target) >> f
-	while (getline < template > 0) {
-		gsub(/__TARGET__/, target, $0)
-		gsub(/__PATH__/, path, $0)
-		printf("%s\n", $0) >> f
+	tmpl = envar["tmpldir"] "/" "data.tmpl"
+
+	printf("# create embedded data object `%s'\n", mvars[mconf, "target"]) >> output
+	while (getline < tmpl > 0) {
+		gsub(/__TARGET__/, mvars[mconf, "target"], $0)
+		gsub(/__PATH__/, mconfdir, $0)
+		gsub(/__NAME__/, mvars[mconf, "name"], $0)
+		$0 = trim($0)
+		printf("%s\n", $0) >> output
 	}
-	close(template)
-	print "" >> f
+	close(tmpl)
+	print "" >> output
+
+	mvars[mconf, "cleanfiles"] = mvars[mconf, "cleanfiles"] " " "$(" mvars[mconf, "target"] ")"
 }
 
-# generate 1 .mk file for specified module -- to be inlined in top Makefile
-function put_mkfile(mod, tags, f)
+# generate 1 .mk file for specified .mconf -- to be inlined in top Makefile
+function put_mkfile(mconf, mconfdir, output)
 {
-	reset_file(f)
-	ob = tags[mod, "obj"]
+	# gather objects from C files
+	cob = mvars[mconf, "cobj"]
 	if (envar["host"] == "unix")
-		ob = ob " " tags[mod, "unix_obj"]
+		cob = cob " " mvars[mconf, "unix_cobj"]
 	if (envar["host"] == "windows")
-		ob = ob " " tags[mod, "win_obj"]
+		cob = cob " " mvars[mconf, "win_cobj"]
+
+	# gather objects from assembly .S files
+	aob = mvars[mconf, "aobj"]
+	if (envar["host"] == "unix")
+		aob = aob " " mvars[mconf, "unix_aobj"]
+	if (envar["host"] == "windows")
+		aob = aob " " mvars[mconf, "win_aobj"]
 
 	# write list of objects to build
-	put_objlist(tags[mod, "name"], ob, f)
+	put_objlist(mconf, cob, aob, output)
 
-	# if the module is a program, write link rules
-	if (tags[mod, "prog"] != "")
-		put_prog(envar["tmpldir"] "/" "prog.tmpl", tags[mod, "target"], mod, tags[mod, "name"], tags[mod, "deps"], tags[mod, "ldflags"], f)
+	# if the mconf module is a program, write link rules
+	if (mvars[mconf, "prog"] != "")
+		put_prog(mconf, mconfdir, output)
 
-	# if the module is a library, write lib creation rules
-	if (tags[mod, "lib"] != "")
-		put_lib(envar["tmpldir"] "/" "lib.tmpl", tags[mod, "target"], mod, f)
+	# if the mconf module is a library, write lib creation rules
+	if (mvars[mconf, "lib"] != "")
+		put_lib(mconf, mconfdir, output)
+
+	# if the mconf module is embedded data objects, write data object creation rules
+	if (mvars[mconf, "data"] != "")
+		put_data(mconf, mconfdir, output)
 
 	# write each object suffix build rules
-	put_suffix_rules(envar["tmpldir"] "/" "suffix.tmpl", ob, tags[mod, "cflags"], f)
+	put_suffix_rules(cob, aob, mconf, output)
 }
 
-function checkvars(envar)
+# generate the all: rule starting with loose targets, then libs, then programs in that order
+# then generate the CLEANFILES rule
+function genallrule(output)
 {
-	if (envar["modfile"] == "")
-		usage()
-	if (envar["topdir"] == "")
+	combined_mconfsfile = envar["makeitgendir"] "/combined-mconfsready.mk"
+	reset_file(combined_mconfsfile)
+
+	printf("all:") > output
+	# write targets that are NOT libraries of programs first
+	for (m in mconfs) {
+		if (mvars[mconfs[m], "prog"] == "" && mvars[mconfs[m], "lib"] == "") {
+			printf(" $(%s)", mvars[mconfs[m], "target"]) >> output
+			put_mkfile(mconfs[m], mconfsdirs[m], combined_mconfsfile)
+		}
+	}
+	# then libraries
+	for (m in mconfs) {
+		if (mvars[mconfs[m], "lib"] != "") {
+			printf(" $(%s)", mvars[mconfs[m], "target"]) >> output
+			put_mkfile(mconfs[m], mconfsdirs[m], combined_mconfsfile)
+		}
+	}
+	# finally programs
+	for (m in mconfs) {
+		if (mvars[mconfs[m], "prog"] != "") {
+			printf(" $(%s)", mvars[mconfs[m], "target"]) >> output
+			put_mkfile(mconfs[m], mconfsdirs[m], combined_mconfsfile)
+		}
+	}
+
+	# collect cleanfiles from all mconfs and set a CLEANFILES make var
+	for (m in mconfs) {
+		cl = cl " " mvars[mconfs[m], "cleanfiles"] " "
+	}
+	cl = trim(cl)
+	printf("\n\nCLEANFILES += %s\n", cl) >> output
+}
+
+# check the parameters passed to the program
+function checkvars()
+{
+	if (envar["mconflist"] == "")
 		usage()
 	if (envar["host"] == "")
 		usage()
-	if (envar["verbose"] == "")
-		usage()
-	if (envar["debug"] == "")
-		usage()
-	if (envar["mfragdir"] == "")
+	if (envar["makeitgendir"] == "")
 		usage()
 	if (envar["tmpldir"] == "")
 		usage()
@@ -272,14 +487,16 @@ function checkvars(envar)
 # main entry
 BEGIN {
 	# variable defs
-	modules[0] = ""
-	nmods = 0
-	tags[0] = ""
+	mconfs[0] = ""
+	mconfsdirs[0] = ""
+	nmconfs = 0
+	mvars[0] = ""
 	words[0] = ""
-	current = ""
+	currkeywd = ""
 	envar[0] = ""
-	klist = "name prog lib src win_src unix_src depends cflags ldflags"
-	klist = klist " " "obj unix_obj win_obj target deps"
+	keywords[0] = ""
+	klist = "name prog lib asrc data csrc win_asrc win_csrc unix_asrc unix_csrc"
+	klist = klist " " "depends cflags ldflags extralibs cleanfiles"
 
 	# init keywords
 	split(klist, keywords, " ")
@@ -292,22 +509,29 @@ BEGIN {
 	}
 
 	# check that we were called with all needed environment vars
-	checkvars(envar)
+	checkvars()
 
-	while (getline < envar["modfile"] > 0)
-		modules[nmods++] = $0
-
-	for (i = 0; i < nmods; i++) {
-		scanmod(modules[i])
-		gensrcs(modules[i], tags)
-		genobjs(modules[i], tags)
-		gentarget(modules[i], tags)
+	# extract mconf dirname and basename from mconfig generated module.lst
+	while (getline < envar["mconflist"] > 0) {
+		mconfs[nmconfs] = $1 "/" $2
+		mconfsdirs[nmconfs] = $1
+		nmconfs++
 	}
 
-	for (i = 0; i < nmods; i++) {
-		gendeps(modules, i, tags)
-		put_mkfile(modules[i], tags, envar["mfragdir"] "/" tags[modules[i], "name"] ".mk")
+	# for all .mconf files found, 1) parse, 2) gen src/obj lists, 3) gen make targets
+	for (i = 0; i < nmconfs; i++) {
+		scanmconf(mconfs[i], envar["makeitgendir"])
+		genobjs(mconfs[i])
+		gentarget(mconfs[i])
 	}
 
-	printtags(tags)
+	# for each make targets generated above, generate dependency rules
+	for (i = 0; i < nmconfs; i++) {
+		gendeps(i)
+	}
+
+	# finally, generate the "all:" rule listing all target in dependency order
+	genallrule(envar["makeitgendir"] "/" "all.mk")
+
+#	printmvars()
 }

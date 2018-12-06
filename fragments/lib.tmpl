@@ -1,9 +1,0 @@
-__TARGET__ := $(BUILDDIR)/__PATH__/__TARGET__.a
-
-$(__TARGET__): $(__TARGET___OBJ)
-	@echo " AR" $@
-	$(V)$(AR) rcs $@ $^
-
-all: $(__TARGET__)
-
-.PHONY: $(__TARGET__)

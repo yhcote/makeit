@@ -1,4 +1,0 @@
-__OBJ__: __SRC__
-	@echo " CC __SRC__"
-	@mkdir -p $(@D)
-	$(V)$(CC) -Wp,-MMD,__OBJ__.d -c $(CFLAGS) __CFLAGS__ $(CPPFLAGS) -o __OBJ__ __SRC__

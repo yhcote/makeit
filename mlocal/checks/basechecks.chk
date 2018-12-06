@@ -1,0 +1,367 @@
+#!/bin/sh -
+# Copyright (c) 2015-2018, Yannick Cote <yhcote@gmail.com>. All rights reserved.
+# Use of this source code is governed by a BSD-style license that can be found
+# in the LICENSE file.
+set -e
+
+########################
+# host compilers
+########################
+if [ "$hstcc" = "" ]; then
+	printf " checking: host C compiler... "
+	for cc in $hstcc_opts; do
+		if $cc -E -x c /dev/null >/dev/null 2>&1; then
+			hstcc="$cc"
+			break
+		fi
+	done
+	if [ "$hstcc" != "" ]; then
+		echo $hstcc
+	else
+		echo "not found!"
+		usage
+		exit 1
+	fi
+else
+	printf " checking: host C compiler... "
+	if $hstcc -E -x c /dev/null >/dev/null 2>&1; then
+		echo $hstcc
+	else
+		echo "$hstcc cannot compile test code!"
+		usage
+		exit 1
+	fi
+
+fi
+if [ "$hstcxx" = "" ]; then
+	printf " checking: host C++ compiler... "
+	for cxx in $hstcxx_opts; do
+		if $cxx -E -x c++ /dev/null >/dev/null 2>&1; then
+			hstcxx="$cxx"
+			break
+		fi
+	done
+	if [ "$hstcxx" != "" ]; then
+		echo $hstcxx
+	else
+		echo "not found!"
+	fi
+else
+	printf " checking: host C++ compiler... "
+	if $hstcxx -E -x c++ /dev/null >/dev/null 2>&1; then
+		echo $hstcxx
+	else
+		echo "$hstcxx cannot compile test code!"
+	fi
+fi
+
+
+########################
+# host tool paths
+########################
+printf " checking: host \`ar' path... "
+if [ "$hstar" = "" ]; then
+	if test `dirname \`$hstcc -print-prog-name=ar\`` = "."; then
+		hstar="ar"
+	else
+		hstar=`(cd \`dirname \\\`$hstcc -print-prog-name=ar\\\`\` && pwd -P || false)`/ar
+	fi
+fi
+echo "$hstar"
+
+printf " checking: host \`ld' path... "
+if [ "$hstld" = "" ]; then
+	if test `dirname \`$hstcc -print-prog-name=ld\`` = "."; then
+		hstld="ld"
+	else
+		hstld=`(cd \`dirname \\\`$hstcc -print-prog-name=ld\\\`\` && pwd -P || false)`/ld
+	fi
+fi
+echo "$hstld"
+
+printf " checking: host \`ranlib' path... "
+if [ "$hstranlib" = "" ]; then
+	if test `dirname \`$hstcc -print-prog-name=ranlib\`` = "."; then
+		hstranlib="ranlib"
+	else
+		hstranlib=`(cd \`dirname \\\`$hstcc -print-prog-name=ranlib\\\`\` && pwd -P || false)`/ranlib
+	fi
+fi
+echo "$hstranlib"
+
+printf " checking: host \`objcopy' path... "
+if [ "$hstobjcopy" = "" ]; then
+	if test `dirname \`$hstcc -print-prog-name=objcopy\`` = "."; then
+		hstobjcopy="objcopy"
+	else
+		hstobjcopy=`(cd \`dirname \\\`$hstcc -print-prog-name=objcopy\\\`\` && pwd -P || false)`/objcopy
+	fi
+fi
+echo "$hstobjcopy"
+
+
+########################
+# target
+########################
+if [ "$tgtcc" = "" ]; then
+	tgtcc=$hstcc
+fi
+if [ "$tgtcxx" = "" ]; then
+	tgtcxx=$hstcxx
+fi
+
+
+########################
+# target compilers
+########################
+printf " checking: target C compiler... "
+if $tgtcc -E -x c /dev/null >/dev/null 2>&1; then
+	echo $tgtcc
+else
+	echo "$tgtcc cannot compile test code!"
+	usage
+	exit 1
+fi
+printf " checking: target C++ compiler... "
+if $tgtcxx -E -x c++ /dev/null >/dev/null 2>&1; then
+	echo $tgtcxx
+else
+	echo "$tgtcxx cannot compile test code!"
+fi
+
+
+########################
+# target tool paths
+########################
+printf " checking: target \`ar' path... "
+if [ "$tgtar" = "" ]; then
+	if test `dirname \`$tgtcc -print-prog-name=ar\`` = "."; then
+		tgtar="ar"
+	else
+		tgtar=`(cd \`dirname \\\`$tgtcc -print-prog-name=ar\\\`\` && pwd -P || false)`/ar
+	fi
+fi
+echo "$tgtar"
+
+printf " checking: target \`ld' path... "
+if [ "$tgtld" = "" ]; then
+	if test `dirname \`$tgtcc -print-prog-name=ld\`` = "."; then
+		tgtld="ld"
+	else
+		tgtld=`(cd \`dirname \\\`$tgtcc -print-prog-name=ld\\\`\` && pwd -P || false)`/ld
+	fi
+fi
+echo "$tgtld"
+
+printf " checking: target \`ranlib' path... "
+if [ "$tgtranlib" = "" ]; then
+	if test `dirname \`$tgtcc -print-prog-name=ranlib\`` = "."; then
+		tgtranlib="ranlib"
+	else
+		tgtranlib=`(cd \`dirname \\\`$tgtcc -print-prog-name=ranlib\\\`\` && pwd -P || false)`/ranlib
+	fi
+fi
+echo "$tgtranlib"
+
+printf " checking: target \`objcopy' path... "
+if [ "$tgtobjcopy" = "" ]; then
+	if test `dirname \`$tgtcc -print-prog-name=objcopy\`` = "."; then
+		tgtobjcopy="objcopy"
+	else
+		tgtobjcopy=`(cd \`dirname \\\`$tgtcc -print-prog-name=objcopy\\\`\` && pwd -P || false)`/objcopy
+	fi
+fi
+echo "$tgtobjcopy"
+
+
+########################
+# static
+########################
+printf " checking: host compiles static binaries... "
+if ! echo "int main(int args, char *argv[]) { return 0; }" | \
+   $hstcc -x c -static -o /dev/null - >/dev/null 2>&1; then
+	hststatic=0
+	echo "no"
+else
+	echo "yes"
+fi
+printf " checking: target compiles static binaries... "
+if ! echo "int main(int args, char *argv[]) { return 0; }" | \
+   $tgtcc -x c -static -o /dev/null - >/dev/null 2>&1; then
+	tgtstatic=0
+	echo "no"
+else
+	echo "yes"
+fi
+
+
+########################
+# host os
+########################
+printf " checking: host os type... "
+host=
+if echo | $hstcc -E -dM - | grep -qs -e __unix__ -e __unix -e unix \
+	-e __APPLE__; then
+	host="unix"
+fi
+if echo | $hstcc -E -dM - | grep -qs -e _WIN32 -e _WIN64 -e __WIN32 \
+	-e __WIN64 -e __WINNT -e __WINNT__ -e __WIN32__ -e WINNT -e __WIN64__ \
+	-e WIN32 -e WIN64; then
+	host="windows"
+fi
+if [ "$host" != "" ]; then
+	echo $host
+else
+	echo "not found!"
+	usage
+	exit 1
+fi
+
+
+########################
+# host architecture
+########################
+printf " checking: host architecture... "
+hst_arch=
+if echo | $hstcc -E -dM - | grep -qs -e __i386 -e __i386__ -e i386; then
+	hst_arch=i386
+fi
+if echo | $hstcc -E -dM - | grep -qs -e __amd64 -e __amd64__ -e __x86_64 \
+	-e __x86_64__; then
+	hst_arch=x86_64
+fi
+if echo | $hstcc -E -dM - | grep -qs -e __arm__; then
+	hst_arch=arm
+fi
+if echo | $hstcc -E -dM - | grep -qs -e __aarch64 -e __aarch64__ -e __arm64 \
+	-e __arm64__; then
+	hst_arch=aarch64
+fi
+if echo | $hstcc -E -dM - | grep -qs -e __ARCH_PPC64 -e __PPC64__; then
+	hst_arch=ppc64
+fi
+if [ "$hst_arch" != "" ]; then
+	echo $hst_arch
+else
+	echo "not found!"
+	usage
+	exit 1
+fi
+
+
+########################
+# target architecture
+########################
+printf " checking: target architecture... "
+tgt_arch=
+if echo | $tgtcc -E -dM - | grep -qs -e __i386 -e __i386__ -e i386; then
+	tgt_arch=i386
+fi
+if echo | $tgtcc -E -dM - | grep -qs -e __amd64 -e __amd64__ -e __x86_64 \
+	-e __x86_64__; then
+	tgt_arch=x86_64
+fi
+if echo | $tgtcc -E -dM - | grep -qs -e __arm__; then
+	tgt_arch=arm
+fi
+if echo | $tgtcc -E -dM - | grep -qs -e __aarch64 -e __aarch64__ -e __arm64 \
+	-e __arm64__; then
+	tgt_arch=aarch64
+fi
+if echo | $tgtcc -E -dM - | grep -qs -e __ARCH_PPC64 -e __PPC64__; then
+	tgt_arch=ppc64
+fi
+if [ "$tgt_arch" != "" ]; then
+	echo $tgt_arch
+else
+	echo "not found!"
+	usage
+	exit 1
+fi
+
+
+
+########################
+# host wordsize
+########################
+printf " checking: host architecture word size... "
+hst_word=
+if echo | $hstcc -E -dM - | grep -qs -e __i386 -e __i386__ -e i386; then
+	hst_word=32
+fi
+if echo | $hstcc -E -dM - | grep -qs -e __amd64 -e __amd64__ -e __x86_64 \
+	-e __x86_64__; then
+	hst_word=64
+fi
+if echo | $hstcc -E -dM - | grep -qs -e __arm__; then
+	hst_word=32
+fi
+if echo | $hstcc -E -dM - | grep -qs -e __aarch64 -e __aarch64__ -e __arm64 \
+	-e __arm64__; then
+	hst_word=64
+fi
+if echo | $hstcc -E -dM - | grep -qs -e __ARCH_PPC64 -e __PPC64__; then
+	hst_word=64
+fi
+if [ "$hst_word" != "" ]; then
+	echo $hst_word
+else
+	echo "not found!"
+	usage
+	exit 1
+fi
+
+
+########################
+# target wordsize
+########################
+printf " checking: target architecture word size... "
+tgt_word=
+if echo | $tgtcc -E -dM - | grep -qs -e __i386 -e __i386__ -e i386; then
+	tgt_word=32
+fi
+if echo | $tgtcc -E -dM - | grep -qs -e __amd64 -e __amd64__ -e __x86_64 \
+	-e __x86_64__; then
+	tgt_word=64
+fi
+if echo | $tgtcc -E -dM - | grep -qs -e __arm__; then
+	tgt_word=32
+fi
+if echo | $tgtcc -E -dM - | grep -qs -e __aarch64 -e __aarch64__ -e __arm64 \
+	-e __arm64__; then
+	tgt_word=64
+fi
+if echo | $tgtcc -E -dM - | grep -qs -e __ARCH_PPC64 -e __PPC64__; then
+	tgt_word=64
+fi
+if [ "$tgt_word" != "" ]; then
+	echo $tgt_word
+else
+	echo "not found!"
+	usage
+	exit 1
+fi
+
+
+########################
+# package version
+########################
+printf " checking: project version... "
+if [ "$package_version" = "" ]; then
+	package_version=`(\
+		git describe --match 'v[0-9]*' --dirty --always 2>/dev/null || \
+		cat VERSION 2>/dev/null || echo "" \
+		) | \
+			sed -e "s/^v//;s/-/_/g;s/_/-/;s/_/./g"`
+fi
+
+if [ "$package_version" != "" ]; then
+	echo $package_version
+else
+	echo "not found!"
+	echo "error: unable to determine \$package_version variable"
+	echo "NOTE: Not in a git tree and VERSION file not found"
+	echo "NOTE: Try running ${0##*/} with [-V version]"
+	usage
+	exit 1
+fi
